@@ -85,7 +85,6 @@ def load_data(uploaded_file):
         if class_col is None:
             st.error(f"找不到班级列，当前列名：{list(df.columns)}")
             return None, None
-        # 重命名为标准名称“班级”
         df.rename(columns={class_col: "班级"}, inplace=True)
         
         # 清理班级列（提取数字）
@@ -102,19 +101,27 @@ def load_data(uploaded_file):
         if total_col is None:
             st.error(f"找不到总分列，当前列名：{list(df.columns)}")
             return None, None
-        # 重命名为标准名称“总分（折）”
         df.rename(columns={total_col: "总分（折）"}, inplace=True)
         total_col = "总分（折）"
         
-        # 转换为数值，剔除无效值
-        df["总分（折）"] = pd.to_numeric(df["总分（折）"], errors="coerce")
-        df = df.sort_values(["班级", "总分（折）"], ascending=[True, False])
+        # ========== 关键：清洗所有科目和总分，转换为数字 ==========
+        # 对所有科目列进行数值转换
+        for subj in ALL_SUBJECTS:
+            if subj in df.columns:
+                df[subj] = pd.to_numeric(df[subj], errors='coerce')
+        # 总分列也转换
+        df[total_col] = pd.to_numeric(df[total_col], errors='coerce')
+        
+        # 删除总分缺失的行（缺考或无效数据）
+        df = df.dropna(subset=[total_col])
+        
+        # 按班级和总分排序
+        df = df.sort_values(["班级", total_col], ascending=[True, False])
         
         return df, total_col
     except Exception as e:
         st.error(f"读取文件失败：{e}")
         return None, None
-
 
 # ============================================================
 # 生成导出Excel（41个Sheet）
@@ -270,6 +277,13 @@ def create_zb_avg_sheet(df, total_col, high_score, low_score, benchmark_high, be
 def calc_preview_metrics(df_class, high_score, low_score, benchmark_high, benchmark_low,
                           subject_lines, bench_subject_lines, total_col):
     """网页预览用的指标计算"""
+    # 防御性转换（以防万一）
+    for subj in ALL_SUBJECTS:
+        if subj in df_class.columns:
+            df_class[subj] = pd.to_numeric(df_class[subj], errors='coerce')
+    df_class[total_col] = pd.to_numeric(df_class[total_col], errors='coerce')
+    df_class = df_class.dropna(subset=[total_col])
+    
     metrics = {
         "avg": df_class[total_col].mean(),
         "high_total": (df_class[total_col] >= high_score).sum(),
