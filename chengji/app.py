@@ -13,11 +13,12 @@ st.title("📊 高二年级成绩分析系统")
 # ============================================================
 # 默认分数线
 # ============================================================
-DEFAULT_HIGH_SCORE = 515.0
-DEFAULT_LOW_SCORE = 505.0
-DEFAULT_BENCHMARK_HIGH = 425.0
-DEFAULT_BENCHMARK_LOW = 415.0
+DEFAULT_HIGH_SCORE = 515.0          # 自招高线
+DEFAULT_LOW_SCORE = 505.0           # 自招低线
+DEFAULT_BENCHMARK_HIGH = 425.0      # 本科高线
+DEFAULT_BENCHMARK_LOW = 415.0       # 本科低线
 
+# 自招单科线
 DEFAULT_SUBJECT_LINES = {
     "语文": 93.5,
     "数学": 108.0,
@@ -30,6 +31,7 @@ DEFAULT_SUBJECT_LINES = {
     "政治": 73.0,
 }
 
+# 本科单科线
 DEFAULT_BENCHMARK_SUBJECT_LINES = {
     "语文": 80.0,
     "数学": 80.0,
@@ -44,7 +46,7 @@ DEFAULT_BENCHMARK_SUBJECT_LINES = {
 
 ALL_SUBJECTS = list(DEFAULT_SUBJECT_LINES.keys())
 
-# 定科组合
+# 定科组合（用于计算班级总分平均分）
 FIXED_SUBJECTS = {
     "1班": ["历史", "政治"],
     "2班": ["历史", "政治"],
@@ -76,7 +78,7 @@ def load_data(uploaded_file):
         df = pd.read_excel(uploaded_file, sheet_name=0)
         df = df.dropna(how="all")
         
-        # ----- 自动识别班级列 -----
+        # 自动识别班级列
         class_col = None
         for col in df.columns:
             if "班级" in str(col) or "班" in str(col) or "class" in str(col).lower():
@@ -87,14 +89,13 @@ def load_data(uploaded_file):
             return None, None
         df.rename(columns={class_col: "班级"}, inplace=True)
         
-        # 清理班级列（提取数字）
+        # 清理班级列
         df["班级"] = df["班级"].astype(str).str.replace("班", "").str.strip()
         df["班级"] = pd.to_numeric(df["班级"], errors="coerce")
         df = df[df["班级"].between(1, 18)]
         
-        # ----- 自动识别总分列（优先赋分总分）-----
+        # 自动识别总分列（优先赋分总分）
         total_col = None
-        # 优先匹配“总分（折）”或“赋分总分”
         for col in df.columns:
             if "总分（折）" in str(col) or "赋分总分" in str(col):
                 total_col = col
@@ -115,7 +116,7 @@ def load_data(uploaded_file):
         df.rename(columns={total_col: "总分（折）"}, inplace=True)
         total_col = "总分（折）"
         
-        # ========== 清洗数据：所有科目和总分转换为数字 ==========
+        # 清洗所有科目和总分，转换为数值
         for subj in ALL_SUBJECTS:
             if subj in df.columns:
                 df[subj] = pd.to_numeric(df[subj], errors='coerce')
@@ -131,161 +132,14 @@ def load_data(uploaded_file):
         st.error(f"读取文件失败：{e}")
         return None, None
 
-# ============================================================
-# 生成导出Excel（41个Sheet）
-# ============================================================
-def generate_excel_report(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
-                          subject_lines, bench_subject_lines):
-    """生成完整的41个Sheet的Excel报表"""
-    output = BytesIO()
-    writer = pd.ExcelWriter(output, engine='openpyxl')
-
-    # 1-18 Sheet：行政班
-    for cls in range(1, 19):
-        df_cls = df[df["班级"] == cls].copy()
-        if len(df_cls) == 0:
-            continue
-        # 添加第六科成绩列
-        df_cls = add_sixth_subject(df_cls)
-        sheet_name = f"{cls}班"
-        df_cls.to_excel(writer, sheet_name=sheet_name, index=False)
-
-    # 19 Sheet：过线统计
-    df_stats = create_stats_sheet(df, high_score, low_score, benchmark_high, benchmark_low,
-                                   subject_lines, bench_subject_lines, total_col)
-    df_stats.to_excel(writer, sheet_name="过线统计", index=False)
-
-    # 20+ Sheet：走班班
-    zb_sheets = create_zb_sheets(df, total_col)
-    for name, df_zb in zb_sheets.items():
-        df_zb.to_excel(writer, sheet_name=name, index=False)
-
-    # 班级各科平均分
-    df_class_avg = create_class_avg_sheet(df, total_col)
-    df_class_avg.to_excel(writer, sheet_name="班级各科平均分", index=False)
-
-    # 走班学科均分
-    df_zb_avg = create_zb_avg_sheet(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
-                                     subject_lines, bench_subject_lines)
-    df_zb_avg.to_excel(writer, sheet_name="走班学科均分", index=False)
-
-    writer.close()
-    output.seek(0)
-    return output
-
-
-def add_sixth_subject(df):
-    """为每个学生添加第六科成绩"""
-    # 根据定科组合，找到走班科
-    # 简化版：从走班列提取
-    if "走班" in df.columns:
-        df["第六科"] = df["走班"]
-    return df
-
-
-def create_stats_sheet(df, high_score, low_score, benchmark_high, benchmark_low,
-                       subject_lines, bench_subject_lines, total_col):
-    """生成过线统计表（5张表合并）"""
-    rows = []
-    for cls in range(1, 19):
-        df_cls = df[df["班级"] == cls]
-        row = {"班级": f"{cls}班", "有效参考人数": len(df_cls)}
-        # 总分过线人数
-        row["特招高线(≥{})".format(high_score)] = (df_cls[total_col] >= high_score).sum()
-        row["特招低线(≥{})".format(low_score)] = (df_cls[total_col] >= low_score).sum()
-        row["本科高线(≥{})".format(benchmark_high)] = (df_cls[total_col] >= benchmark_high).sum()
-        row["本科低线(≥{})".format(benchmark_low)] = (df_cls[total_col] >= benchmark_low).sum()
-        # 各科过特招线人数
-        for subj in ALL_SUBJECTS:
-            if subj in df_cls.columns:
-                row[f"{subj}过特招"] = (df_cls[subj] >= subject_lines[subj]).sum()
-        # 各科过本科线人数
-        for subj in ALL_SUBJECTS:
-            if subj in df_cls.columns:
-                row[f"{subj}过本科"] = (df_cls[subj] >= bench_subject_lines[subj]).sum()
-        # 特招有效贡献率
-        for subj in ALL_SUBJECTS:
-            if subj in df_cls.columns:
-                total_online = (df_cls[subj] >= subject_lines[subj]).sum()
-                contrib = ((df_cls[subj] >= subject_lines[subj]) & (df_cls[total_col] >= high_score)).sum()
-                row[f"{subj}特招贡献率"] = contrib / total_online if total_online > 0 else 0
-        # 本科有效贡献率
-        for subj in ALL_SUBJECTS:
-            if subj in df_cls.columns:
-                total_online = (df_cls[subj] >= bench_subject_lines[subj]).sum()
-                contrib = ((df_cls[subj] >= bench_subject_lines[subj]) & (df_cls[total_col] >= benchmark_high)).sum()
-                row[f"{subj}本科贡献率"] = contrib / total_online if total_online > 0 else 0
-        rows.append(row)
-    return pd.DataFrame(rows)
-
-
-def create_zb_sheets(df, total_col):
-    """生成走班班Sheet"""
-    if "走班" not in df.columns:
-        return {}
-    zb_dict = {}
-    for zb_name in df["走班"].unique():
-        if pd.isna(zb_name) or zb_name == "":
-            continue
-        df_zb = df[df["走班"] == zb_name].copy()
-        df_zb = df_zb.sort_values(total_col, ascending=False)
-        zb_dict[zb_name] = df_zb
-    return zb_dict
-
-
-def create_class_avg_sheet(df, total_col):
-    """生成班级各科平均分"""
-    rows = []
-    for cls in range(1, 19):
-        df_cls = df[df["班级"] == cls]
-        row = {"班级": f"{cls}班", "有效人数": len(df_cls)}
-        for subj in ALL_SUBJECTS:
-            if subj in df_cls.columns:
-                row[f"{subj}均分"] = df_cls[subj].mean()
-        row["总分均分"] = df_cls[total_col].mean()
-        rows.append(row)
-    return pd.DataFrame(rows)
-
-
-def create_zb_avg_sheet(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
-                        subject_lines, bench_subject_lines):
-    """生成走班学科均分"""
-    if "走班" not in df.columns:
-        return pd.DataFrame()
-    rows = []
-    for zb_name in df["走班"].unique():
-        if pd.isna(zb_name) or zb_name == "":
-            continue
-        df_zb = df[df["走班"] == zb_name]
-        row = {"走班班": zb_name, "人数": len(df_zb)}
-        # 识别该走班对应的学科
-        subject = None
-        for subj in ["物理", "化学", "生物", "历史", "地理", "政治"]:
-            if subj in zb_name:
-                subject = subj
-                break
-        if subject and subject in df_zb.columns:
-            row[f"{subject}赋分均分"] = df_zb[subject].mean()
-            # 原始分均分（如果有）
-            raw_col = f"{subject}原始分"
-            if raw_col in df_zb.columns:
-                row[f"{subject}原始分均分"] = df_zb[raw_col].mean()
-            # 达线人数
-            row["特招达线人数"] = (df_zb[subject] >= subject_lines[subject]).sum()
-            row["特招贡献率"] = ((df_zb[subject] >= subject_lines[subject]) & (df_zb[total_col] >= high_score)).sum() / max((df_zb[subject] >= subject_lines[subject]).sum(), 1)
-            row["本科达线人数"] = (df_zb[subject] >= bench_subject_lines[subject]).sum()
-            row["本科贡献率"] = ((df_zb[subject] >= bench_subject_lines[subject]) & (df_zb[total_col] >= benchmark_high)).sum() / max((df_zb[subject] >= bench_subject_lines[subject]).sum(), 1)
-        rows.append(row)
-    return pd.DataFrame(rows)
-
 
 # ============================================================
-# 计算预览指标
+# 预览指标计算（页面展示用）
 # ============================================================
 def calc_preview_metrics(df_class, high_score, low_score, benchmark_high, benchmark_low,
                           subject_lines, bench_subject_lines, total_col):
-    """网页预览用的指标计算"""
-    # 防御性转换（以防万一）
+    """计算单个班级的预览指标"""
+    # 防御性转换
     for subj in ALL_SUBJECTS:
         if subj in df_class.columns:
             df_class[subj] = pd.to_numeric(df_class[subj], errors='coerce')
@@ -309,17 +163,150 @@ def calc_preview_metrics(df_class, high_score, low_score, benchmark_high, benchm
             metrics["bench_contrib"][subj] = 0
             metrics["bench_rate"][subj] = 0
             continue
-        # 特招
+        # 自招有效贡献率
         total = (df_class[subj] >= subject_lines[subj]).sum()
         contrib = ((df_class[subj] >= subject_lines[subj]) & (df_class[total_col] >= high_score)).sum()
         metrics["high_contrib"][subj] = contrib
         metrics["high_rate"][subj] = contrib / total if total > 0 else 0
-        # 本科
+        # 本科有效贡献率
         total_b = (df_class[subj] >= bench_subject_lines[subj]).sum()
         contrib_b = ((df_class[subj] >= bench_subject_lines[subj]) & (df_class[total_col] >= benchmark_high)).sum()
         metrics["bench_contrib"][subj] = contrib_b
         metrics["bench_rate"][subj] = contrib_b / total_b if total_b > 0 else 0
     return metrics
+
+
+# ============================================================
+# 生成导出Excel（41个Sheet）
+# ============================================================
+def generate_excel_report(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
+                          subject_lines, bench_subject_lines):
+    output = BytesIO()
+    writer = pd.ExcelWriter(output, engine='openpyxl')
+
+    # 1-18 Sheet：行政班
+    for cls in range(1, 19):
+        df_cls = df[df["班级"] == cls].copy()
+        if len(df_cls) == 0:
+            continue
+        df_cls.to_excel(writer, sheet_name=f"{cls}班", index=False)
+
+    # 19 Sheet：过线统计（5张表）
+    df_stats = create_stats_sheet(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
+                                   subject_lines, bench_subject_lines)
+    df_stats.to_excel(writer, sheet_name="过线统计", index=False)
+
+    # 20+ Sheet：走班班
+    zb_sheets = create_zb_sheets(df, total_col)
+    for name, df_zb in zb_sheets.items():
+        df_zb.to_excel(writer, sheet_name=name, index=False)
+
+    # 班级各科平均分
+    df_class_avg = create_class_avg_sheet(df, total_col)
+    df_class_avg.to_excel(writer, sheet_name="班级各科平均分", index=False)
+
+    # 走班学科均分
+    df_zb_avg = create_zb_avg_sheet(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
+                                     subject_lines, bench_subject_lines)
+    df_zb_avg.to_excel(writer, sheet_name="走班学科均分", index=False)
+
+    writer.close()
+    output.seek(0)
+    return output
+
+
+def create_stats_sheet(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
+                       subject_lines, bench_subject_lines):
+    rows = []
+    for cls in range(1, 19):
+        df_cls = df[df["班级"] == cls]
+        row = {"班级": f"{cls}班", "有效参考人数": len(df_cls)}
+        # 总分过线人数
+        row[f"自招高线(≥{high_score})"] = (df_cls[total_col] >= high_score).sum()
+        row[f"自招低线(≥{low_score})"] = (df_cls[total_col] >= low_score).sum()
+        row[f"本科高线(≥{benchmark_high})"] = (df_cls[total_col] >= benchmark_high).sum()
+        row[f"本科低线(≥{benchmark_low})"] = (df_cls[total_col] >= benchmark_low).sum()
+        # 各科过自招线人数
+        for subj in ALL_SUBJECTS:
+            if subj in df_cls.columns:
+                row[f"{subj}过自招"] = (df_cls[subj] >= subject_lines[subj]).sum()
+        # 各科过本科线人数
+        for subj in ALL_SUBJECTS:
+            if subj in df_cls.columns:
+                row[f"{subj}过本科"] = (df_cls[subj] >= bench_subject_lines[subj]).sum()
+        # 自招有效贡献率
+        for subj in ALL_SUBJECTS:
+            if subj in df_cls.columns:
+                total_online = (df_cls[subj] >= subject_lines[subj]).sum()
+                contrib = ((df_cls[subj] >= subject_lines[subj]) & (df_cls[total_col] >= high_score)).sum()
+                row[f"{subj}自招贡献率"] = contrib / total_online if total_online > 0 else 0
+        # 本科有效贡献率
+        for subj in ALL_SUBJECTS:
+            if subj in df_cls.columns:
+                total_online = (df_cls[subj] >= bench_subject_lines[subj]).sum()
+                contrib = ((df_cls[subj] >= bench_subject_lines[subj]) & (df_cls[total_col] >= benchmark_high)).sum()
+                row[f"{subj}本科贡献率"] = contrib / total_online if total_online > 0 else 0
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def create_zb_sheets(df, total_col):
+    if "走班" not in df.columns:
+        return {}
+    zb_dict = {}
+    for zb_name in df["走班"].unique():
+        if pd.isna(zb_name) or zb_name == "":
+            continue
+        df_zb = df[df["走班"] == zb_name].copy()
+        df_zb = df_zb.sort_values(total_col, ascending=False)
+        zb_dict[zb_name] = df_zb
+    return zb_dict
+
+
+def create_class_avg_sheet(df, total_col):
+    rows = []
+    for cls in range(1, 19):
+        df_cls = df[df["班级"] == cls]
+        row = {"班级": f"{cls}班", "有效人数": len(df_cls)}
+        for subj in ALL_SUBJECTS:
+            if subj in df_cls.columns:
+                row[f"{subj}均分"] = df_cls[subj].mean()
+        row["总分均分"] = df_cls[total_col].mean()
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def create_zb_avg_sheet(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
+                        subject_lines, bench_subject_lines):
+    if "走班" not in df.columns:
+        return pd.DataFrame()
+    rows = []
+    for zb_name in df["走班"].unique():
+        if pd.isna(zb_name) or zb_name == "":
+            continue
+        df_zb = df[df["走班"] == zb_name]
+        row = {"走班班": zb_name, "人数": len(df_zb)}
+        subject = None
+        for subj in ["物理", "化学", "生物", "历史", "地理", "政治"]:
+            if subj in zb_name:
+                subject = subj
+                break
+        if subject and subject in df_zb.columns:
+            row[f"{subject}赋分均分"] = df_zb[subject].mean()
+            raw_col = f"{subject}原始分"
+            if raw_col in df_zb.columns:
+                row[f"{subject}原始分均分"] = df_zb[raw_col].mean()
+            # 达线人数与有效贡献率
+            row["自招达线人数"] = (df_zb[subject] >= subject_lines[subject]).sum()
+            total_zb = (df_zb[subject] >= subject_lines[subject]).sum()
+            contrib_zb = ((df_zb[subject] >= subject_lines[subject]) & (df_zb[total_col] >= high_score)).sum()
+            row["自招有效贡献率"] = contrib_zb / total_zb if total_zb > 0 else 0
+            row["本科达线人数"] = (df_zb[subject] >= bench_subject_lines[subject]).sum()
+            total_zb_b = (df_zb[subject] >= bench_subject_lines[subject]).sum()
+            contrib_zb_b = ((df_zb[subject] >= bench_subject_lines[subject]) & (df_zb[total_col] >= benchmark_high)).sum()
+            row["本科有效贡献率"] = contrib_zb_b / total_zb_b if total_zb_b > 0 else 0
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 # ============================================================
@@ -346,12 +333,12 @@ with st.sidebar:
     st.markdown("---")
     st.header("⚙️ 分数线设置")
 
-    high_score = st.number_input("特招高线", value=515.0, step=1.0)
-    low_score = st.number_input("特招低线", value=505.0, step=1.0)
+    high_score = st.number_input("自招高线", value=515.0, step=1.0)
+    low_score = st.number_input("自招低线", value=505.0, step=1.0)
     benchmark_high = st.number_input("本科高线", value=425.0, step=1.0)
     benchmark_low = st.number_input("本科低线", value=415.0, step=1.0)
 
-    st.subheader("特招单科线")
+    st.subheader("自招单科线")
     subject_lines = {}
     cols = st.columns(3)
     for i, subj in enumerate(ALL_SUBJECTS):
@@ -395,27 +382,27 @@ if uploaded_file is not None and df is not None:
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("班级平均分", f"{metrics['avg']:.2f}")
-    col2.metric(f"特招高线（≥{high_score:.0f}）", metrics['high_total'])
-    col3.metric(f"特招低线（≥{low_score:.0f}）", metrics['low_total'])
+    col2.metric(f"自招高线（≥{high_score:.0f}）", metrics['high_total'])
+    col3.metric(f"自招低线（≥{low_score:.0f}）", metrics['low_total'])
     col4.metric(f"本科高线（≥{benchmark_high:.0f}）", metrics['bench_high_total'])
 
     st.markdown("---")
 
-    # 特招贡献
-    st.subheader(f"📊 特招线（≥{high_score:.0f}分）有效贡献")
+    # 自招有效贡献
+    st.subheader(f"📊 自招线（≥{high_score:.0f}分）有效贡献")
     high_df = pd.DataFrame({
         "科目": ALL_SUBJECTS,
         "贡献人数": [metrics["high_contrib"][s] for s in ALL_SUBJECTS],
-        "贡献率": [f"{metrics['high_rate'][s]*100:.1f}%" for s in ALL_SUBJECTS],
+        "有效贡献率": [f"{metrics['high_rate'][s]*100:.1f}%" for s in ALL_SUBJECTS],
     })
     st.table(high_df.style.hide(axis="index"))
 
-    # 本科贡献
+    # 本科有效贡献
     st.subheader(f"📊 本科线（≥{benchmark_high:.0f}分）有效贡献")
     bench_df = pd.DataFrame({
         "科目": ALL_SUBJECTS,
         "贡献人数": [metrics["bench_contrib"][s] for s in ALL_SUBJECTS],
-        "贡献率": [f"{metrics['bench_rate'][s]*100:.1f}%" for s in ALL_SUBJECTS],
+        "有效贡献率": [f"{metrics['bench_rate'][s]*100:.1f}%" for s in ALL_SUBJECTS],
     })
     st.table(bench_df.style.hide(axis="index"))
 
