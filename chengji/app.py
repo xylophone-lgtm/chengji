@@ -72,28 +72,44 @@ FIXED_SUBJECTS = {
 # ============================================================
 @st.cache_data
 def load_data(uploaded_file):
-    """读取总表，返回DataFrame"""
     try:
         df = pd.read_excel(uploaded_file, sheet_name=0)
         df = df.dropna(how="all")
-        # 清理班级列
-        if "班级" not in df.columns:
-            st.error("Excel中找不到'班级'列")
-            return None
+        
+        # ----- 自动识别班级列 -----
+        class_col = None
+        for col in df.columns:
+            if "班级" in str(col) or "班" in str(col) or "class" in str(col).lower():
+                class_col = col
+                break
+        if class_col is None:
+            st.error(f"找不到班级列，当前列名：{list(df.columns)}")
+            return None, None
+        # 重命名为标准名称“班级”
+        df.rename(columns={class_col: "班级"}, inplace=True)
+        
+        # 清理班级列（提取数字）
         df["班级"] = df["班级"].astype(str).str.replace("班", "").str.strip()
         df["班级"] = pd.to_numeric(df["班级"], errors="coerce")
         df = df[df["班级"].between(1, 18)]
-        # 查找总分列
+        
+        # ----- 自动识别总分列 -----
         total_col = None
-        for col in ["总分（折）", "总分(折)", "赋分总分", "总分", "总分（赋分）"]:
-            if col in df.columns:
+        for col in df.columns:
+            if "总分" in str(col) or "赋分总分" in str(col):
                 total_col = col
                 break
         if total_col is None:
-            st.error("找不到总分列")
-            return None
-        df["总分_用于排序"] = pd.to_numeric(df[total_col], errors="coerce")
-        df = df.sort_values(["班级", "总分_用于排序"], ascending=[True, False])
+            st.error(f"找不到总分列，当前列名：{list(df.columns)}")
+            return None, None
+        # 重命名为标准名称“总分（折）”
+        df.rename(columns={total_col: "总分（折）"}, inplace=True)
+        total_col = "总分（折）"
+        
+        # 转换为数值，剔除无效值
+        df["总分（折）"] = pd.to_numeric(df["总分（折）"], errors="coerce")
+        df = df.sort_values(["班级", "总分（折）"], ascending=[True, False])
+        
         return df, total_col
     except Exception as e:
         st.error(f"读取文件失败：{e}")
