@@ -92,27 +92,35 @@ def load_data(uploaded_file):
         df["班级"] = pd.to_numeric(df["班级"], errors="coerce")
         df = df[df["班级"].between(1, 18)]
         
-        # ----- 自动识别总分列 -----
+        # ----- 自动识别总分列（优先赋分总分）-----
         total_col = None
+        # 优先匹配“总分（折）”或“赋分总分”
         for col in df.columns:
-            if "总分" in str(col) or "赋分总分" in str(col):
+            if "总分（折）" in str(col) or "赋分总分" in str(col):
                 total_col = col
                 break
+        if total_col is None:
+            for col in df.columns:
+                if "总分(折)" in str(col):
+                    total_col = col
+                    break
+        if total_col is None:
+            for col in df.columns:
+                if "总分" in str(col):
+                    total_col = col
+                    break
         if total_col is None:
             st.error(f"找不到总分列，当前列名：{list(df.columns)}")
             return None, None
         df.rename(columns={total_col: "总分（折）"}, inplace=True)
         total_col = "总分（折）"
         
-        # ========== 关键：清洗所有科目和总分，转换为数字 ==========
-        # 对所有科目列进行数值转换
+        # ========== 清洗数据：所有科目和总分转换为数字 ==========
         for subj in ALL_SUBJECTS:
             if subj in df.columns:
                 df[subj] = pd.to_numeric(df[subj], errors='coerce')
-        # 总分列也转换
         df[total_col] = pd.to_numeric(df[total_col], errors='coerce')
-        
-        # 删除总分缺失的行（缺考或无效数据）
+        # 删除总分缺失的行（缺考学生不计入统计）
         df = df.dropna(subset=[total_col])
         
         # 按班级和总分排序
