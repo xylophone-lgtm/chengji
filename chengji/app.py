@@ -20,7 +20,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# 初始化 session_state 中的分数线
+# 初始化 session_state
 # ============================================================
 if 'high_score' not in st.session_state:
     st.session_state.high_score = 515.499
@@ -31,32 +31,36 @@ if 'bench_high' not in st.session_state:
 if 'bench_low' not in st.session_state:
     st.session_state.bench_low = 415.499
 
-if 'subject_lines' not in st.session_state:
-    st.session_state.subject_lines = {
-        "语文": 93.5,
-        "数学": 108.0,
-        "英语": 83.0,
-        "物理": 73.0,
-        "化学": 73.0,
-        "生物": 73.0,
-        "历史": 73.0,
-        "地理": 73.0,
-        "政治": 73.0,
+# 自招高线单科线
+if 'subject_high_lines' not in st.session_state:
+    st.session_state.subject_high_lines = {
+        "语文": 93.5, "数学": 108.0, "英语": 83.0,
+        "物理": 73.0, "化学": 73.0, "生物": 73.0,
+        "历史": 73.0, "地理": 73.0, "政治": 73.0,
     }
-if 'bench_subject_lines' not in st.session_state:
-    st.session_state.bench_subject_lines = {
-        "语文": 80.0,
-        "数学": 80.0,
-        "英语": 57.0,
-        "物理": 61.0,
-        "化学": 61.0,
-        "生物": 61.0,
-        "历史": 61.0,
-        "地理": 61.0,
-        "政治": 61.0,
+# 自招低线单科线
+if 'subject_low_lines' not in st.session_state:
+    st.session_state.subject_low_lines = {
+        "语文": 92.5, "数学": 107.0, "英语": 82.0,
+        "物理": 72.0, "化学": 72.0, "生物": 72.0,
+        "历史": 72.0, "地理": 72.0, "政治": 72.0,
+    }
+# 本科高线单科线
+if 'bench_subject_high_lines' not in st.session_state:
+    st.session_state.bench_subject_high_lines = {
+        "语文": 80.0, "数学": 80.0, "英语": 57.0,
+        "物理": 61.0, "化学": 61.0, "生物": 61.0,
+        "历史": 61.0, "地理": 61.0, "政治": 61.0,
+    }
+# 本科低线单科线
+if 'bench_subject_low_lines' not in st.session_state:
+    st.session_state.bench_subject_low_lines = {
+        "语文": 79.0, "数学": 79.0, "英语": 56.0,
+        "物理": 60.0, "化学": 60.0, "生物": 60.0,
+        "历史": 60.0, "地理": 60.0, "政治": 60.0,
     }
 
-ALL_SUBJECTS = list(st.session_state.subject_lines.keys())
+ALL_SUBJECTS = list(st.session_state.subject_high_lines.keys())
 
 FIXED_SUBJECTS = {
     "1班": ["历史", "政治"],
@@ -145,43 +149,38 @@ def load_data(uploaded_file):
 
 
 # ============================================================
-# 导入分数线
+# 导入分数线（支持高线/低线/本科线）
 # ============================================================
 def parse_score_file(uploaded_score_file):
-    """解析分数线文件，返回字典"""
     try:
         df = pd.read_excel(uploaded_score_file, header=0)
-        # 期望一行数据
         if len(df) == 0:
             st.error("分数线文件为空")
             return None
         row = df.iloc[0].to_dict()
-        # 映射列名
-        mapping = {
-            "自招高线": "high_score",
-            "自招低线": "low_score",
-            "本科高线": "bench_high",
-            "本科低线": "bench_low",
-        }
         result = {}
-        for key, val in mapping.items():
+
+        # 总分线
+        for key in ["自招高线", "自招低线", "本科高线", "本科低线"]:
             if key in row:
-                result[val] = float(row[key])
-        # 各科自招线
+                result[key] = float(row[key])
+
+        # 单科线：高线/低线/本科线
+        # 对每个科目，尝试 "语文高线", "语文低线", "语文本科线" 等
         subject_lines = {}
         for subj in ALL_SUBJECTS:
-            if subj in row:
-                subject_lines[subj] = float(row[subj])
-        # 各科本科线
-        bench_subject_lines = {}
-        for subj in ALL_SUBJECTS:
-            if f"{subj}本科" in row:
-                bench_subject_lines[subj] = float(row[f"{subj}本科"])
-            elif f"{subj}_本科" in row:
-                bench_subject_lines[subj] = float(row[f"{subj}_本科"])
-        # 如果本科线单独列名，也可以直接取“本科语文”等
+            # 高线
+            if f"{subj}高线" in row:
+                subject_lines[f"{subj}_high"] = float(row[f"{subj}高线"])
+            # 低线
+            if f"{subj}低线" in row:
+                subject_lines[f"{subj}_low"] = float(row[f"{subj}低线"])
+            # 本科线（可能叫“语文本科线”或“语文本科线”）
+            if f"{subj}本科线" in row:
+                subject_lines[f"{subj}_bench"] = float(row[f"{subj}本科线"])
+            elif f"{subj}本科" in row:
+                subject_lines[f"{subj}_bench"] = float(row[f"{subj}本科"])
         result['subject_lines'] = subject_lines
-        result['bench_subject_lines'] = bench_subject_lines
         return result
     except Exception as e:
         st.error(f"解析分数线文件失败：{e}")
@@ -191,8 +190,9 @@ def parse_score_file(uploaded_score_file):
 # ============================================================
 # 预览指标计算
 # ============================================================
-def calc_preview_metrics(df_class, high_score, low_score, benchmark_high, benchmark_low,
-                          subject_lines, bench_subject_lines, total_col):
+def calc_preview_metrics(df_class, high_score, low_score, bench_high, bench_low,
+                         subject_high_lines, subject_low_lines,
+                         bench_subject_high, bench_subject_low, total_col):
     for subj in ALL_SUBJECTS:
         if subj in df_class.columns:
             df_class[subj] = pd.to_numeric(df_class[subj], errors='coerce')
@@ -202,65 +202,94 @@ def calc_preview_metrics(df_class, high_score, low_score, benchmark_high, benchm
     total_students = len(df_class)
     high_total = (df_class[total_col] >= high_score).sum()
     low_total = (df_class[total_col] >= low_score).sum()
-    bench_high_total = (df_class[total_col] >= benchmark_high).sum()
+    bench_high_total = (df_class[total_col] >= bench_high).sum()
+    bench_low_total = (df_class[total_col] >= bench_low).sum()
 
     metrics = {
         "avg": df_class[total_col].mean(),
         "high_total": high_total,
         "low_total": low_total,
         "bench_high_total": bench_high_total,
+        "bench_low_total": bench_low_total,
         "high_rate_total": high_total / total_students if total_students > 0 else 0,
-        "bench_rate_total": bench_high_total / total_students if total_students > 0 else 0,
-        "high_contrib": {},
-        "high_rate": {},
-        "bench_contrib": {},
-        "bench_rate": {},
+        "low_rate_total": low_total / total_students if total_students > 0 else 0,
+        "bench_high_rate_total": bench_high_total / total_students if total_students > 0 else 0,
+        "bench_low_rate_total": bench_low_total / total_students if total_students > 0 else 0,
+        # 各科贡献数据（高/低/本科高/本科低）
+        "high_contrib": {}, "high_rate": {},
+        "low_contrib": {}, "low_rate": {},
+        "bench_high_contrib": {}, "bench_high_rate": {},
+        "bench_low_contrib": {}, "bench_low_rate": {},
     }
     for subj in ALL_SUBJECTS:
         if subj not in df_class.columns:
-            metrics["high_contrib"][subj] = 0
-            metrics["high_rate"][subj] = 0
-            metrics["bench_contrib"][subj] = 0
-            metrics["bench_rate"][subj] = 0
+            # 置空
+            for key in ["high_contrib", "high_rate", "low_contrib", "low_rate",
+                        "bench_high_contrib", "bench_high_rate", "bench_low_contrib", "bench_low_rate"]:
+                if "contrib" in key:
+                    metrics[key][subj] = 0
+                else:
+                    metrics[key][subj] = 0
             continue
-        total = (df_class[subj] >= subject_lines[subj]).sum()
-        contrib = ((df_class[subj] >= subject_lines[subj]) & (df_class[total_col] >= high_score)).sum()
+        # 自招高线
+        total = (df_class[subj] >= subject_high_lines[subj]).sum()
+        contrib = ((df_class[subj] >= subject_high_lines[subj]) & (df_class[total_col] >= high_score)).sum()
         metrics["high_contrib"][subj] = contrib
         metrics["high_rate"][subj] = contrib / total if total > 0 else 0
-        total_b = (df_class[subj] >= bench_subject_lines[subj]).sum()
-        contrib_b = ((df_class[subj] >= bench_subject_lines[subj]) & (df_class[total_col] >= benchmark_high)).sum()
-        metrics["bench_contrib"][subj] = contrib_b
-        metrics["bench_rate"][subj] = contrib_b / total_b if total_b > 0 else 0
+        # 自招低线
+        total = (df_class[subj] >= subject_low_lines[subj]).sum()
+        contrib = ((df_class[subj] >= subject_low_lines[subj]) & (df_class[total_col] >= low_score)).sum()
+        metrics["low_contrib"][subj] = contrib
+        metrics["low_rate"][subj] = contrib / total if total > 0 else 0
+        # 本科高线
+        total = (df_class[subj] >= bench_subject_high[subj]).sum()
+        contrib = ((df_class[subj] >= bench_subject_high[subj]) & (df_class[total_col] >= bench_high)).sum()
+        metrics["bench_high_contrib"][subj] = contrib
+        metrics["bench_high_rate"][subj] = contrib / total if total > 0 else 0
+        # 本科低线
+        total = (df_class[subj] >= bench_subject_low[subj]).sum()
+        contrib = ((df_class[subj] >= bench_subject_low[subj]) & (df_class[total_col] >= bench_low)).sum()
+        metrics["bench_low_contrib"][subj] = contrib
+        metrics["bench_low_rate"][subj] = contrib / total if total > 0 else 0
+
     return metrics
 
 
 # ============================================================
-# 导出Excel
+# 导出Excel（包含所有线的统计）
 # ============================================================
-def generate_excel_report(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
-                          subject_lines, bench_subject_lines):
+def generate_excel_report(df, total_col, high_score, low_score, bench_high, bench_low,
+                          subject_high_lines, subject_low_lines,
+                          bench_subject_high, bench_subject_low):
     output = BytesIO()
     writer = pd.ExcelWriter(output, engine='openpyxl')
 
+    # 行政班
     for cls in range(1, 19):
         df_cls = df[df["班级"] == cls].copy()
         if len(df_cls) == 0:
             continue
         df_cls.to_excel(writer, sheet_name=f"{cls}班", index=False)
 
-    df_stats = create_stats_sheet(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
-                                   subject_lines, bench_subject_lines)
+    # 过线统计（含四套线）
+    df_stats = create_stats_sheet(df, total_col, high_score, low_score, bench_high, bench_low,
+                                   subject_high_lines, subject_low_lines,
+                                   bench_subject_high, bench_subject_low)
     df_stats.to_excel(writer, sheet_name="过线统计", index=False)
 
+    # 走班班
     zb_sheets = create_zb_sheets(df, total_col)
     for name, df_zb in zb_sheets.items():
         df_zb.to_excel(writer, sheet_name=name, index=False)
 
+    # 班级各科平均分
     df_class_avg = create_class_avg_sheet(df, total_col)
     df_class_avg.to_excel(writer, sheet_name="班级各科平均分", index=False)
 
-    df_zb_avg = create_zb_avg_sheet(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
-                                     subject_lines, bench_subject_lines)
+    # 走班学科均分（含四套线）
+    df_zb_avg = create_zb_avg_sheet(df, total_col, high_score, low_score, bench_high, bench_low,
+                                     subject_high_lines, subject_low_lines,
+                                     bench_subject_high, bench_subject_low)
     df_zb_avg.to_excel(writer, sheet_name="走班学科均分", index=False)
 
     writer.close()
@@ -268,32 +297,37 @@ def generate_excel_report(df, total_col, high_score, low_score, benchmark_high, 
     return output
 
 
-def create_stats_sheet(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
-                       subject_lines, bench_subject_lines):
+def create_stats_sheet(df, total_col, high_score, low_score, bench_high, bench_low,
+                       subject_high_lines, subject_low_lines,
+                       bench_subject_high, bench_subject_low):
     rows = []
     for cls in range(1, 19):
         df_cls = df[df["班级"] == cls]
         row = {"班级": f"{cls}班", "有效参考人数": len(df_cls)}
+        # 总分过线
         row[f"自招高线(≥{high_score})"] = (df_cls[total_col] >= high_score).sum()
         row[f"自招低线(≥{low_score})"] = (df_cls[total_col] >= low_score).sum()
-        row[f"本科高线(≥{benchmark_high})"] = (df_cls[total_col] >= benchmark_high).sum()
-        row[f"本科低线(≥{benchmark_low})"] = (df_cls[total_col] >= benchmark_low).sum()
+        row[f"本科高线(≥{bench_high})"] = (df_cls[total_col] >= bench_high).sum()
+        row[f"本科低线(≥{bench_low})"] = (df_cls[total_col] >= bench_low).sum()
+        # 各科过线（高线/低线）
         for subj in ALL_SUBJECTS:
             if subj in df_cls.columns:
-                row[f"{subj}过自招"] = (df_cls[subj] >= subject_lines[subj]).sum()
+                row[f"{subj}过自招高线"] = (df_cls[subj] >= subject_high_lines[subj]).sum()
+                row[f"{subj}过自招低线"] = (df_cls[subj] >= subject_low_lines[subj]).sum()
+                row[f"{subj}过本科高线"] = (df_cls[subj] >= bench_subject_high[subj]).sum()
+                row[f"{subj}过本科低线"] = (df_cls[subj] >= bench_subject_low[subj]).sum()
+        # 贡献率（四套）
         for subj in ALL_SUBJECTS:
             if subj in df_cls.columns:
-                row[f"{subj}过本科"] = (df_cls[subj] >= bench_subject_lines[subj]).sum()
-        for subj in ALL_SUBJECTS:
-            if subj in df_cls.columns:
-                total_online = (df_cls[subj] >= subject_lines[subj]).sum()
-                contrib = ((df_cls[subj] >= subject_lines[subj]) & (df_cls[total_col] >= high_score)).sum()
-                row[f"{subj}自招贡献率"] = contrib / total_online if total_online > 0 else 0
-        for subj in ALL_SUBJECTS:
-            if subj in df_cls.columns:
-                total_online = (df_cls[subj] >= bench_subject_lines[subj]).sum()
-                contrib = ((df_cls[subj] >= bench_subject_lines[subj]) & (df_cls[total_col] >= benchmark_high)).sum()
-                row[f"{subj}本科贡献率"] = contrib / total_online if total_online > 0 else 0
+                for label, (sline, tline) in [
+                    ("自招高线贡献率", (subject_high_lines[subj], high_score)),
+                    ("自招低线贡献率", (subject_low_lines[subj], low_score)),
+                    ("本科高线贡献率", (bench_subject_high[subj], bench_high)),
+                    ("本科低线贡献率", (bench_subject_low[subj], bench_low)),
+                ]:
+                    total_online = (df_cls[subj] >= sline).sum()
+                    contrib = ((df_cls[subj] >= sline) & (df_cls[total_col] >= tline)).sum()
+                    row[f"{subj}{label}"] = contrib / total_online if total_online > 0 else 0
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -324,8 +358,9 @@ def create_class_avg_sheet(df, total_col):
     return pd.DataFrame(rows)
 
 
-def create_zb_avg_sheet(df, total_col, high_score, low_score, benchmark_high, benchmark_low,
-                        subject_lines, bench_subject_lines):
+def create_zb_avg_sheet(df, total_col, high_score, low_score, bench_high, bench_low,
+                        subject_high_lines, subject_low_lines,
+                        bench_subject_high, bench_subject_low):
     if "走班" not in df.columns:
         return pd.DataFrame()
     rows = []
@@ -344,14 +379,18 @@ def create_zb_avg_sheet(df, total_col, high_score, low_score, benchmark_high, be
             raw_col = f"{subject}原始分"
             if raw_col in df_zb.columns:
                 row[f"{subject}原始分均分"] = df_zb[raw_col].mean()
-            row["自招达线人数"] = (df_zb[subject] >= subject_lines[subject]).sum()
-            total_zb = (df_zb[subject] >= subject_lines[subject]).sum()
-            contrib_zb = ((df_zb[subject] >= subject_lines[subject]) & (df_zb[total_col] >= high_score)).sum()
-            row["自招有效贡献率"] = contrib_zb / total_zb if total_zb > 0 else 0
-            row["本科达线人数"] = (df_zb[subject] >= bench_subject_lines[subject]).sum()
-            total_zb_b = (df_zb[subject] >= bench_subject_lines[subject]).sum()
-            contrib_zb_b = ((df_zb[subject] >= bench_subject_lines[subject]) & (df_zb[total_col] >= benchmark_high)).sum()
-            row["本科有效贡献率"] = contrib_zb_b / total_zb_b if total_zb_b > 0 else 0
+
+            # 四套达线及贡献率
+            for label, (sline, tline) in [
+                ("自招高线", (subject_high_lines[subject], high_score)),
+                ("自招低线", (subject_low_lines[subject], low_score)),
+                ("本科高线", (bench_subject_high[subject], bench_high)),
+                ("本科低线", (bench_subject_low[subject], bench_low)),
+            ]:
+                total_zb = (df_zb[subject] >= sline).sum()
+                contrib_zb = ((df_zb[subject] >= sline) & (df_zb[total_col] >= tline)).sum()
+                row[f"{label}达线人数"] = total_zb
+                row[f"{label}有效贡献率"] = contrib_zb / total_zb if total_zb > 0 else 0
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -373,7 +412,6 @@ def get_zb_list(df):
 with st.sidebar:
     st.header("📁 数据上传")
     uploaded_file = st.file_uploader("上传成绩表 (Excel)", type=["xls", "xlsx"], key="score_file")
-    
     if uploaded_file is not None:
         df, total_col, has_zb = load_data(uploaded_file)
         if df is not None:
@@ -391,18 +429,33 @@ with st.sidebar:
     if score_file is not None:
         parsed = parse_score_file(score_file)
         if parsed is not None:
-            # 更新 session_state
-            for key in ["high_score", "low_score", "bench_high", "bench_low"]:
+            # 更新总分
+            for key in ["自招高线", "自招低线", "本科高线", "本科低线"]:
                 if key in parsed:
-                    st.session_state[key] = parsed[key]
-            if 'subject_lines' in parsed and parsed['subject_lines']:
-                for subj, val in parsed['subject_lines'].items():
-                    if subj in st.session_state.subject_lines:
-                        st.session_state.subject_lines[subj] = val
-            if 'bench_subject_lines' in parsed and parsed['bench_subject_lines']:
-                for subj, val in parsed['bench_subject_lines'].items():
-                    if subj in st.session_state.bench_subject_lines:
-                        st.session_state.bench_subject_lines[subj] = val
+                    val = parsed[key]
+                    if key == "自招高线":
+                        st.session_state.high_score = val
+                    elif key == "自招低线":
+                        st.session_state.low_score = val
+                    elif key == "本科高线":
+                        st.session_state.bench_high = val
+                    elif key == "本科低线":
+                        st.session_state.bench_low = val
+            # 更新单科
+            if 'subject_lines' in parsed:
+                for key, val in parsed['subject_lines'].items():
+                    # key 形如 "语文_high", "语文_low", "语文_bench"
+                    parts = key.split('_')
+                    if len(parts) == 2:
+                        subj, typ = parts
+                        if subj in ALL_SUBJECTS:
+                            if typ == "high":
+                                st.session_state.subject_high_lines[subj] = val
+                            elif typ == "low":
+                                st.session_state.subject_low_lines[subj] = val
+                            elif typ == "bench":
+                                st.session_state.bench_subject_high_lines[subj] = val  # 默认用高线
+                                # 如果需要本科低线，需要额外字段
             st.success("✅ 分数线已导入！")
             st.rerun()
 
@@ -438,45 +491,56 @@ with st.sidebar:
     st.markdown("---")
     st.header("⚙️ 分数线设置")
 
-    # 使用 session_state 作为默认值
+    # 总分线
     high_score = st.number_input("自招高线", value=st.session_state.high_score, step=0.001, key="input_high")
     low_score = st.number_input("自招低线", value=st.session_state.low_score, step=0.001, key="input_low")
     bench_high = st.number_input("本科高线", value=st.session_state.bench_high, step=0.001, key="input_bench_high")
     bench_low = st.number_input("本科低线", value=st.session_state.bench_low, step=0.001, key="input_bench_low")
-
-    # 同步 session_state
+    # 同步
     st.session_state.high_score = high_score
     st.session_state.low_score = low_score
     st.session_state.bench_high = bench_high
     st.session_state.bench_low = bench_low
 
-    st.subheader("自招单科线")
-    subject_lines = {}
+    # 自招高线单科
+    st.subheader("自招高线单科线")
+    subject_high_lines = {}
     cols = st.columns(3)
     for i, subj in enumerate(ALL_SUBJECTS):
         col = cols[i % 3]
-        val = col.number_input(
-            f"{subj}", 
-            value=st.session_state.subject_lines[subj], 
-            step=0.5, 
-            key=f"sub_{subj}"
-        )
-        subject_lines[subj] = val
-        st.session_state.subject_lines[subj] = val
+        val = col.number_input(f"{subj}", value=st.session_state.subject_high_lines[subj], step=0.5, key=f"sub_high_{subj}")
+        subject_high_lines[subj] = val
+        st.session_state.subject_high_lines[subj] = val
 
-    st.subheader("本科单科线")
-    bench_subject_lines = {}
+    # 自招低线单科
+    st.subheader("自招低线单科线")
+    subject_low_lines = {}
     cols = st.columns(3)
     for i, subj in enumerate(ALL_SUBJECTS):
         col = cols[i % 3]
-        val = col.number_input(
-            f"{subj}", 
-            value=st.session_state.bench_subject_lines[subj], 
-            step=0.5, 
-            key=f"bench_sub_{subj}"
-        )
-        bench_subject_lines[subj] = val
-        st.session_state.bench_subject_lines[subj] = val
+        val = col.number_input(f"{subj}", value=st.session_state.subject_low_lines[subj], step=0.5, key=f"sub_low_{subj}")
+        subject_low_lines[subj] = val
+        st.session_state.subject_low_lines[subj] = val
+
+    # 本科高线单科
+    st.subheader("本科高线单科线")
+    bench_subject_high = {}
+    cols = st.columns(3)
+    for i, subj in enumerate(ALL_SUBJECTS):
+        col = cols[i % 3]
+        val = col.number_input(f"{subj}", value=st.session_state.bench_subject_high_lines[subj], step=0.5, key=f"bench_high_{subj}")
+        bench_subject_high[subj] = val
+        st.session_state.bench_subject_high_lines[subj] = val
+
+    # 本科低线单科
+    st.subheader("本科低线单科线")
+    bench_subject_low = {}
+    cols = st.columns(3)
+    for i, subj in enumerate(ALL_SUBJECTS):
+        col = cols[i % 3]
+        val = col.number_input(f"{subj}", value=st.session_state.bench_subject_low_lines[subj], step=0.5, key=f"bench_low_{subj}")
+        bench_subject_low[subj] = val
+        st.session_state.bench_subject_low_lines[subj] = val
 
     # ---------- 导出 ----------
     st.markdown("---")
@@ -484,7 +548,8 @@ with st.sidebar:
         with st.spinner("正在生成报表..."):
             excel_data = generate_excel_report(
                 df, total_col, high_score, low_score, bench_high, bench_low,
-                subject_lines, bench_subject_lines
+                subject_high_lines, subject_low_lines,
+                bench_subject_high, bench_subject_low
             )
             st.download_button(
                 label="📥 下载报表",
@@ -495,27 +560,31 @@ with st.sidebar:
 
 
 # ============================================================
-# 主区域预览
+# 主区域预览（显示四套线）
 # ============================================================
 if uploaded_file is not None and df is not None:
     metrics = calc_preview_metrics(
         df_selected, high_score, low_score, bench_high, bench_low,
-        subject_lines, bench_subject_lines, total_col
+        subject_high_lines, subject_low_lines,
+        bench_subject_high, bench_subject_low, total_col
     )
 
     st.subheader(f"⚡ {display_name} 成绩分析报告")
 
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
     col1.metric("平均分", f"{metrics['avg']:.2f}")
-    col2.metric(f"自招高线达线率", f"{metrics['high_rate_total']*100:.1f}%")
-    col3.metric(f"自招高线人数", metrics['high_total'])
-    col4.metric(f"自招低线人数", metrics['low_total'])
-    col5.metric(f"本科高线达线率", f"{metrics['bench_rate_total']*100:.1f}%")
-    col6.metric(f"本科高线人数", metrics['bench_high_total'])
+    col2.metric("自招高线达线率", f"{metrics['high_rate_total']*100:.1f}%")
+    col3.metric("自招高线人数", metrics['high_total'])
+    col4.metric("自招低线达线率", f"{metrics['low_rate_total']*100:.1f}%")
+    col5.metric("自招低线人数", metrics['low_total'])
+    col6.metric("本科高线达线率", f"{metrics['bench_high_rate_total']*100:.1f}%")
+    col7.metric("本科高线人数", metrics['bench_high_total'])
+    col8.metric("本科低线人数", metrics['bench_low_total'])
 
     st.markdown("---")
 
-    st.subheader(f"📊 自招线（≥{high_score:.0f}分）有效贡献")
+    # 自招高线有效贡献
+    st.subheader(f"📊 自招高线（≥{high_score:.0f}分）有效贡献")
     high_df = pd.DataFrame({
         "科目": ALL_SUBJECTS,
         "贡献人数": [metrics["high_contrib"][s] for s in ALL_SUBJECTS],
@@ -523,13 +592,32 @@ if uploaded_file is not None and df is not None:
     })
     st.table(high_df.style.hide(axis="index"))
 
-    st.subheader(f"📊 本科线（≥{bench_high:.0f}分）有效贡献")
-    bench_df = pd.DataFrame({
+    # 自招低线有效贡献
+    st.subheader(f"📊 自招低线（≥{low_score:.0f}分）有效贡献")
+    low_df = pd.DataFrame({
         "科目": ALL_SUBJECTS,
-        "贡献人数": [metrics["bench_contrib"][s] for s in ALL_SUBJECTS],
-        "有效贡献率": [f"{metrics['bench_rate'][s]*100:.1f}%" for s in ALL_SUBJECTS],
+        "贡献人数": [metrics["low_contrib"][s] for s in ALL_SUBJECTS],
+        "有效贡献率": [f"{metrics['low_rate'][s]*100:.1f}%" for s in ALL_SUBJECTS],
     })
-    st.table(bench_df.style.hide(axis="index"))
+    st.table(low_df.style.hide(axis="index"))
+
+    # 本科高线有效贡献
+    st.subheader(f"📊 本科高线（≥{bench_high:.0f}分）有效贡献")
+    bench_high_df = pd.DataFrame({
+        "科目": ALL_SUBJECTS,
+        "贡献人数": [metrics["bench_high_contrib"][s] for s in ALL_SUBJECTS],
+        "有效贡献率": [f"{metrics['bench_high_rate'][s]*100:.1f}%" for s in ALL_SUBJECTS],
+    })
+    st.table(bench_high_df.style.hide(axis="index"))
+
+    # 本科低线有效贡献
+    st.subheader(f"📊 本科低线（≥{bench_low:.0f}分）有效贡献")
+    bench_low_df = pd.DataFrame({
+        "科目": ALL_SUBJECTS,
+        "贡献人数": [metrics["bench_low_contrib"][s] for s in ALL_SUBJECTS],
+        "有效贡献率": [f"{metrics['bench_low_rate'][s]*100:.1f}%" for s in ALL_SUBJECTS],
+    })
+    st.table(bench_low_df.style.hide(axis="index"))
 
     with st.expander("📋 查看本班学生明细"):
         display_cols = ["姓名"] + ALL_SUBJECTS + [total_col]
