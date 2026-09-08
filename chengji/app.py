@@ -274,6 +274,7 @@ def generate_excel_report(df, total_col, high_score, low_score, bench_high, benc
     df_class_avg = create_class_avg_sheet(df, total_col)
     df_class_avg.to_excel(writer, sheet_name="班级各科平均分", index=False)
 
+    # 走班学科均分（新格式）
     df_zb_avg = create_zb_avg_sheet(df, total_col, high_score, low_score, bench_high, bench_low,
                                      subject_high_lines, subject_low_lines,
                                      bench_subject_high, bench_subject_low)
@@ -345,36 +346,85 @@ def create_class_avg_sheet(df, total_col):
 def create_zb_avg_sheet(df, total_col, high_score, low_score, bench_high, bench_low,
                         subject_high_lines, subject_low_lines,
                         bench_subject_high, bench_subject_low):
+    """走班学科均分 - 只显示每个走班对应的学科"""
     if "走班" not in df.columns:
         return pd.DataFrame()
     rows = []
+    # 识别走班对应的学科
+    subject_keywords = ["物理", "化学", "生物", "历史", "地理", "政治"]
+    # 走班对应的原始分列名（可能叫"物理原始分"或"物理原"等）
+    
     for zb_name in df["走班"].unique():
         if pd.isna(zb_name) or zb_name == "":
             continue
         df_zb = df[df["走班"] == zb_name]
         row = {"走班班": zb_name, "人数": len(df_zb)}
+        
+        # 识别该走班对应的学科
         subject = None
-        for subj in ["物理", "化学", "生物", "历史", "地理", "政治"]:
+        for subj in subject_keywords:
             if subj in zb_name:
                 subject = subj
                 break
-        if subject and subject in df_zb.columns:
-            row[f"{subject}赋分均分"] = df_zb[subject].mean()
-            raw_col = f"{subject}原始分"
-            if raw_col in df_zb.columns:
-                row[f"{subject}原始分均分"] = df_zb[raw_col].mean()
-
-            for label, (sline, tline) in [
-                ("自招高线", (subject_high_lines[subject], high_score)),
-                ("自招低线", (subject_low_lines[subject], low_score)),
-                ("本科高线", (bench_subject_high[subject], bench_high)),
-                ("本科低线", (bench_subject_low[subject], bench_low)),
-            ]:
-                total_zb = (df_zb[subject] >= sline).sum()
-                contrib_zb = ((df_zb[subject] >= sline) & (df_zb[total_col] >= tline)).sum()
-                row[f"{label}达线人数"] = total_zb
-                row[f"{label}有效贡献率"] = contrib_zb / total_zb if total_zb > 0 else 0
+        if subject is None:
+            rows.append(row)
+            continue
+        
+        # 查找原始分列
+        raw_col = None
+        for col in df_zb.columns:
+            if subject in col and ("原始" in col or "原" in col):
+                raw_col = col
+                break
+        # 查找赋分列
+        score_col = None
+        for col in df_zb.columns:
+            if subject in col and col == subject:
+                score_col = col
+                break
+        if score_col is None:
+            rows.append(row)
+            continue
+        
+        # 计算原始分均分
+        if raw_col and raw_col in df_zb.columns:
+            row["原始分均分"] = df_zb[raw_col].mean()
+        else:
+            row["原始分均分"] = None
+        
+        # 计算赋分均分
+        if score_col in df_zb.columns:
+            row["赋分均分"] = df_zb[score_col].mean()
+        else:
+            row["赋分均分"] = None
+        
+        # 计算各线达线人数和有效贡献率
+        # 自招高线
+        total_high = (df_zb[score_col] >= subject_high_lines[subject]).sum()
+        contrib_high = ((df_zb[score_col] >= subject_high_lines[subject]) & (df_zb[total_col] >= high_score)).sum()
+        row["自招高线达线人数"] = total_high
+        row["自招高线有效贡献率"] = contrib_high / total_high if total_high > 0 else 0
+        
+        # 自招低线
+        total_low = (df_zb[score_col] >= subject_low_lines[subject]).sum()
+        contrib_low = ((df_zb[score_col] >= subject_low_lines[subject]) & (df_zb[total_col] >= low_score)).sum()
+        row["自招低线达线人数"] = total_low
+        row["自招低线有效贡献率"] = contrib_low / total_low if total_low > 0 else 0
+        
+        # 本科高线
+        total_bh = (df_zb[score_col] >= bench_subject_high[subject]).sum()
+        contrib_bh = ((df_zb[score_col] >= bench_subject_high[subject]) & (df_zb[total_col] >= bench_high)).sum()
+        row["本科高线达线人数"] = total_bh
+        row["本科高线有效贡献率"] = contrib_bh / total_bh if total_bh > 0 else 0
+        
+        # 本科低线
+        total_bl = (df_zb[score_col] >= bench_subject_low[subject]).sum()
+        contrib_bl = ((df_zb[score_col] >= bench_subject_low[subject]) & (df_zb[total_col] >= bench_low)).sum()
+        row["本科低线达线人数"] = total_bl
+        row["本科低线有效贡献率"] = contrib_bl / total_bl if total_bl > 0 else 0
+        
         rows.append(row)
+    
     return pd.DataFrame(rows)
 
 
@@ -393,25 +443,17 @@ def get_zb_list(df):
 # 表格样式渲染函数
 # ============================================================
 def render_styled_table(df, bg_color="#FFF3E0"):
-    """渲染带边框、居中的表格，可指定背景色"""
-    n_rows, n_cols = df.shape
-    # 构建HTML表格
     html = '<table style="border-collapse: collapse; width: 100%; font-size: 14px;">'
-    
-    # 表头
     html += '<thead><tr style="background-color: #e0e0e0; border: 1px solid #333;">'
     for col in df.columns:
         html += f'<th style="border: 1px solid #333; padding: 6px 8px; text-align: center; font-weight: 600;">{col}</th>'
     html += '</tr></thead><tbody>'
-    
-    # 数据行
     for _, row in df.iterrows():
         html += f'<tr style="background-color: {bg_color}; border: 1px solid #333;">'
         for val in row:
             html += f'<td style="border: 1px solid #333; padding: 6px 8px; text-align: center;">{val}</td>'
         html += '</tr>'
     html += '</tbody></table>'
-    
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -581,41 +623,41 @@ if uploaded_file is not None and df is not None:
 
     st.markdown("---")
 
-    # 自招高线有效贡献（橙色）
+    # 自招高线有效贡献
     st.subheader(f"📊 自招高线（≥{high_score:.0f}分）有效贡献")
     high_df = pd.DataFrame({
         "科目": ALL_SUBJECTS,
         "贡献人数": [metrics["high_contrib"][s] for s in ALL_SUBJECTS],
         "有效贡献率": [f"{metrics['high_rate'][s]*100:.1f}%" for s in ALL_SUBJECTS],
     })
-    render_styled_table(high_df, bg_color="#FFF3E0")  # 橙色
+    render_styled_table(high_df, bg_color="#FFF3E0")
 
-    # 自招低线有效贡献（橙色）
+    # 自招低线有效贡献
     st.subheader(f"📊 自招低线（≥{low_score:.0f}分）有效贡献")
     low_df = pd.DataFrame({
         "科目": ALL_SUBJECTS,
         "贡献人数": [metrics["low_contrib"][s] for s in ALL_SUBJECTS],
         "有效贡献率": [f"{metrics['low_rate'][s]*100:.1f}%" for s in ALL_SUBJECTS],
     })
-    render_styled_table(low_df, bg_color="#FFF3E0")  # 橙色
+    render_styled_table(low_df, bg_color="#FFF3E0")
 
-    # 本科高线有效贡献（浅蓝色）
+    # 本科高线有效贡献
     st.subheader(f"📊 本科高线（≥{bench_high:.0f}分）有效贡献")
     bench_high_df = pd.DataFrame({
         "科目": ALL_SUBJECTS,
         "贡献人数": [metrics["bench_high_contrib"][s] for s in ALL_SUBJECTS],
         "有效贡献率": [f"{metrics['bench_high_rate'][s]*100:.1f}%" for s in ALL_SUBJECTS],
     })
-    render_styled_table(bench_high_df, bg_color="#E3F2FD")  # 浅蓝
+    render_styled_table(bench_high_df, bg_color="#E3F2FD")
 
-    # 本科低线有效贡献（浅蓝色）
+    # 本科低线有效贡献
     st.subheader(f"📊 本科低线（≥{bench_low:.0f}分）有效贡献")
     bench_low_df = pd.DataFrame({
         "科目": ALL_SUBJECTS,
         "贡献人数": [metrics["bench_low_contrib"][s] for s in ALL_SUBJECTS],
         "有效贡献率": [f"{metrics['bench_low_rate'][s]*100:.1f}%" for s in ALL_SUBJECTS],
     })
-    render_styled_table(bench_low_df, bg_color="#E3F2FD")  # 浅蓝
+    render_styled_table(bench_low_df, bg_color="#E3F2FD")
 
     with st.expander("📋 查看本班学生明细"):
         display_cols = ["姓名"] + ALL_SUBJECTS + [total_col]
